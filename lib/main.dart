@@ -1,8 +1,11 @@
+import 'package:alchoholdetect/profile_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:alchoholdetect/supabase_config.dart';
 import 'package:alchoholdetect/auth_page.dart';
 import 'package:alchoholdetect/gps_locator.dart';
+import 'package:alchoholdetect/police_dashBoard.dart';
 
 String _generateUniqueUsername(String name) {
   final cleanName = name.toLowerCase().replaceAll(' ', '_').replaceAll(RegExp(r'[^a-z0-9_]'), '');
@@ -12,6 +15,13 @@ String _generateUniqueUsername(String name) {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+  FlutterLocalNotificationsPlugin();
+  const AndroidInitializationSettings initializationSettingsAndroid =
+  AndroidInitializationSettings('@mipmap/ic_launcher');
+  const InitializationSettings initializationSettings =
+  InitializationSettings(android: initializationSettingsAndroid);
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
   await Supabase.initialize(
     url: SupabaseConfig.url,
@@ -92,7 +102,12 @@ class AuthWrapper extends StatelessWidget {
         if (snapshot.hasData) {
           final AuthState state = snapshot.data!;
           if (state.event == AuthChangeEvent.signedIn) {
-            return const HomePage();
+            final user = Supabase.instance.client.auth.currentUser;
+            if (user?.email == "dummyemail@police.gov.bd") {
+              return PoliceDashboardScreen();
+            } else {
+              return const ProfilePage();
+            }
           }
         }
         return const AuthPage(); // This will show login first

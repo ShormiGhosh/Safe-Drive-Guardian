@@ -62,6 +62,11 @@ class _AuthPageState extends State<AuthPage> {
     });
 
     try {
+      if (email == "dummyemail@police.gov.bd") {
+        if (password != "police123") {
+          throw const AuthException("Invalid police credentials");
+        }
+      }
       // Sign up with Supabase
       final AuthResponse response = await _supabase.auth.signUp(
         email: email,
@@ -99,7 +104,8 @@ class _AuthPageState extends State<AuthPage> {
       if (error.message.toLowerCase().contains('invalid email')) {
         errorMessage = 'Please enter a valid email address';
       } else if (error.message.contains('already registered')) {
-        errorMessage = 'This email is already registered. Please sign in instead.';
+        errorMessage =
+            'This email is already registered. Please sign in instead.';
       } else {
         errorMessage = error.message;
       }
@@ -116,7 +122,6 @@ class _AuthPageState extends State<AuthPage> {
     }
   }
 
-
   Future<void> _signIn() async {
     String email = _emailController.text.trim().toLowerCase();
     final String password = _passwordController.text.trim();
@@ -126,24 +131,33 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
 
-    // Basic validation
-    if (!_isValidEmail(email)) {
-      _showSnackBar('Please enter a valid email address', isError: true);
-      return;
-    }
-
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final AuthResponse response = await _supabase.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
-
-      if (response.user != null) {
-        _showSnackBar('Login successful!', isError: false);
+      // Check for police credentials first
+      if (email == "dummyemail@police.gov.bd") {
+        if (password == "police123") {
+          final response = await _supabase.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          if (response.user != null) {
+            _showSnackBar('Police login successful!', isError: false);
+          }
+        } else {
+          throw const AuthException("Invalid police credentials");
+        }
+      } else {
+        // Regular user login
+        final response = await _supabase.auth.signInWithPassword(
+          email: email,
+          password: password,
+        );
+        if (response.user != null) {
+          _showSnackBar('Login successful!', isError: false);
+        }
       }
     } on AuthException catch (error) {
       String errorMessage = 'Login failed';
@@ -206,10 +220,14 @@ class _AuthPageState extends State<AuthPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 60),
-              Icon(
-                Icons.security,
-                size: 80,
-                color: Colors.blue[700],
+              Image.asset(
+                'assets/images/alcoholProject_logo.png',
+                height: 80,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  print('Error loading image: $error');
+                  return const Icon(Icons.error);
+                },
               ),
               const SizedBox(height: 20),
               Text(
@@ -224,10 +242,7 @@ class _AuthPageState extends State<AuthPage> {
               const SizedBox(height: 10),
               Text(
                 _isSignUp ? 'Create your account' : 'Sign in to your account',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 40),
@@ -277,11 +292,16 @@ class _AuthPageState extends State<AuthPage> {
                 obscureText: !_isPasswordVisible,
                 decoration: InputDecoration(
                   labelText: 'Password',
-                  hintText: _isSignUp ? 'At least 6 characters' : 'Enter your password',
+                  hintText:
+                      _isSignUp
+                          ? 'At least 6 characters'
+                          : 'Enter your password',
                   prefixIcon: Icon(Icons.lock, color: Colors.blue[600]),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                      _isPasswordVisible
+                          ? Icons.visibility
+                          : Icons.visibility_off,
                       color: Colors.blue[600],
                     ),
                     onPressed: _togglePasswordVisibility,
@@ -300,7 +320,12 @@ class _AuthPageState extends State<AuthPage> {
               SizedBox(
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : _isSignUp ? _signUp : _signIn,
+                  onPressed:
+                      _isLoading
+                          ? null
+                          : _isSignUp
+                          ? _signUp
+                          : _signIn,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue[600],
                     foregroundColor: Colors.white,
@@ -308,31 +333,32 @@ class _AuthPageState extends State<AuthPage> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                      : Text(
-                    _isSignUp ? 'Sign Up' : 'Sign In',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  child:
+                      _isLoading
+                          ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
+                          : Text(
+                            _isSignUp ? 'Sign Up' : 'Sign In',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                 ),
               ),
               const SizedBox(height: 20),
 
               TextButton(
                 onPressed: _isLoading ? null : _toggleAuthMode,
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.blue[600],
-                ),
+                style: TextButton.styleFrom(foregroundColor: Colors.blue[600]),
                 child: Text(
                   _isSignUp
                       ? 'Already have an account? Sign In'
