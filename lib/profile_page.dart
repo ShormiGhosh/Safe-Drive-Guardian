@@ -1,3 +1,4 @@
+import 'package:alchoholdetect/services/session_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_heatmap_calendar/flutter_heatmap_calendar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -24,6 +25,7 @@ AppBar buildAppBar(BuildContext context) {
       IconButton(
         icon: const Icon(Icons.logout),
         onPressed: () async {
+          await SessionManager.clearSession();
           await Supabase.instance.client.auth.signOut();
         },
         tooltip: 'Sign Out',

@@ -1,3 +1,4 @@
+import 'package:alchoholdetect/services/session_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -144,6 +145,11 @@ class _AuthPageState extends State<AuthPage> {
             password: password,
           );
           if (response.user != null) {
+            await SessionManager.saveLoginSession(
+              email: email,
+              userId: response.user!.id,
+              isPolice: true,
+            );
             _showSnackBar('Police login successful!', isError: false);
           }
         } else {
@@ -156,6 +162,11 @@ class _AuthPageState extends State<AuthPage> {
           password: password,
         );
         if (response.user != null) {
+          await SessionManager.saveLoginSession(
+            email: email,
+            userId: response.user!.id,
+            isPolice: false,
+          );
           _showSnackBar('Login successful!', isError: false);
         }
       }

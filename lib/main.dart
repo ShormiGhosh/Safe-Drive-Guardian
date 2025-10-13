@@ -1,4 +1,5 @@
 import 'package:alchoholdetect/profile_page.dart';
+import 'package:alchoholdetect/services/session_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -6,12 +7,6 @@ import 'package:alchoholdetect/supabase_config.dart';
 import 'package:alchoholdetect/auth_page.dart';
 import 'package:alchoholdetect/gps_locator.dart';
 import 'package:alchoholdetect/police_dashBoard.dart';
-
-String _generateUniqueUsername(String name) {
-  final cleanName = name.toLowerCase().replaceAll(' ', '_').replaceAll(RegExp(r'[^a-z0-9_]'), '');
-  final timestamp = DateTime.now().millisecondsSinceEpoch;
-  return '${cleanName}_$timestamp';
-}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -96,21 +91,26 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<AuthState>(
-      stream: Supabase.instance.client.auth.onAuthStateChange,
+    return FutureBuilder<bool>(
+      future: SessionManager.isLoggedIn(),
       builder: (context, snapshot) {
-        if (snapshot.hasData) {
-          final AuthState state = snapshot.data!;
-          if (state.event == AuthChangeEvent.signedIn) {
-            final user = Supabase.instance.client.auth.currentUser;
-            if (user?.email == "dummyemail@police.gov.bd") {
-              return PoliceDashboardScreen();
-            } else {
-              return const ProfilePage();
-            }
-          }
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
         }
-        return const AuthPage(); // This will show login first
+
+        if (snapshot.data == true) {
+          return FutureBuilder<bool>(
+            future: SessionManager.isPoliceUser(),
+            builder: (context, policeSnapshot) {
+              if (policeSnapshot.data == true) {
+                return const PoliceDashboardScreen();
+              }
+              return const ProfilePage();
+            },
+          );
+        }
+
+        return const AuthPage();
       },
     );
   }
@@ -168,6 +168,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _signOut() async {
     try {
+      await SessionManager.clearSession();
       await Supabase.instance.client.auth.signOut();
     } catch (error) {
       print('Error signing out: $error');
