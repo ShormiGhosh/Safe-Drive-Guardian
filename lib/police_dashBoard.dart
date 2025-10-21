@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as realtime;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -8,62 +9,78 @@ class PoliceDashboardScreen extends StatefulWidget {
 
   @override
   State<PoliceDashboardScreen> createState() => _PoliceDashboardScreenState();
-}
-
-class _PoliceDashboardScreenState extends State<PoliceDashboardScreen> {
-  final SupabaseClient supabase = Supabase.instance.client;
-  List<Map<String, dynamic>> alerts = [];
+}class _PoliceDashboardScreenState extends State<PoliceDashboardScreen> {
+  final _supabase = Supabase.instance.client;
+  List<Map<String, dynamic>> _notifications = [];
+  bool _isLoading = true;
   late RealtimeChannel _subscription;
 
   @override
   void initState() {
     super.initState();
-    _loadAlerts();
+    _loadNotifications();
     _setupRealtimeSubscription();
   }
 
   void _setupRealtimeSubscription() {
-    _subscription = supabase
-        .channel('police_alerts')
+    _subscription = _supabase
+        .channel('police_notifications')
         .onPostgresChanges(
-      event: PostgresChangeEvent.insert,
+      event: realtime.PostgresChangeEvent.insert,
       schema: 'public',
       table: 'police_notifications',
       callback: (payload) async {
-        print('New police notification: ${payload.toString()}');
-        await _loadAlerts();
-        if (mounted) setState(() {});
+        print('New police notification: ${payload.newRecord}');
+        await _loadNotifications();
       },
     )
-        .subscribe((status, [error]) {
-      print('Subscription status: $status');
-      if (error != null) print('Subscription error: $error');
+        .subscribe((status, error) {
+      print('Channel status: $status');
+      if (error != null) print('Channel error: $error');
     });
   }
 
-  Future<void> _loadAlerts() async {
+  Future<void> _loadNotifications() async {
     try {
-      final response = await supabase
+      final response = await _supabase
           .from('police_notifications')
           .select('''
-            *,
-            profiles!police_notifications_user_id_fkey (
-              username
-            )
-          ''')
+          *,
+          profiles!police_notifications_user_id_fkey (
+            username
+          )
+        ''')
           .order('timestamp', ascending: false);
 
       if (mounted) {
         setState(() {
-          alerts = List<Map<String, dynamic>>.from(response);
+          _notifications = List<Map<String, dynamic>>.from(response);
+          _isLoading = false;
         });
       }
     } catch (e) {
-      print('Error loading alerts: $e');
+      print('Error loading notifications: $e');
+      setState(() => _isLoading = false);
     }
   }
 
+  @override
+  void dispose() {
+    _subscription.unsubscribe();
+    super.dispose();
+  }
 
+  Future<void> _updateStatus(int notificationId, String status) async {
+    try {
+      await _supabase
+          .from('police_notifications')
+          .update({'status': status})
+          .eq('id', notificationId);
+      await _loadNotifications();
+    } catch (e) {
+      print('Error updating status: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -71,53 +88,71 @@ class _PoliceDashboardScreenState extends State<PoliceDashboardScreen> {
       appBar: AppBar(
         title: const Text('Police Dashboard'),
         backgroundColor: Colors.blue[900],
+        foregroundColor: Colors.white,
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadAlerts,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+        onRefresh: _loadNotifications,
         child: ListView.builder(
           physics: const AlwaysScrollableScrollPhysics(),
-          itemCount: alerts.length,
+          itemCount: _notifications.length,
           itemBuilder: (context, index) {
-            final alert = alerts[index];
-            // Safely handle location data
-            String? mapLink;
-            if (alert['location'] != null && alert['location'].toString().contains(',')) {
-              final location = alert['location'].toString().split(',');
-              if (location.length == 2) {
-                mapLink = 'https://www.google.com/maps/search/?api=1&query=${location[0]},${location[1]}';
-              }
-            }
+            final notification = _notifications[index];
+            final timestamp = DateTime.parse(notification['timestamp'])
+                .toLocal();
+            final status = notification['status'] ?? 'pending';
 
             return Card(
               margin: const EdgeInsets.all(8),
-              color: alert['alert'] == true ? Colors.red[50] : Colors.white,
               child: ListTile(
-                leading: const Icon(
+                leading: Icon(
                   Icons.warning,
-                  color: Colors.red,
+                  color: status == 'pending' ? Colors.red : Colors.grey,
                   size: 40,
                 ),
                 title: Text(
-                  'User: ${alert['profiles']['username']} - Level: ${alert['alcohol_level']}',
+                  'User: ${notification['profiles']['username']}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Time: ${alert['timestamp']}'),
-                    const SizedBox(height: 4),
-                    if (mapLink != null)
-                      InkWell(
-                        onTap: () => _openMap(mapLink!),
-                        child: const Text(
-                          '📍 View Location',
-                          style: TextStyle(
-                            color: Colors.blue,
-                            decoration: TextDecoration.underline,
-                          ),
+                    Text('Alcohol Level: ${notification['alcohol_level']}'),
+                    Text('Time: ${timestamp.toString().substring(0, 16)}'),
+                    Text('Status: ${status.toUpperCase()}'),
+                    if (notification['location'] != null) ...[
+                      const SizedBox(height: 8),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.location_on),
+                        label: const Text('View User Location'),
+                        onPressed: () => _openMap(notification['location']),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(double.infinity, 36),
                         ),
                       ),
+                    ],
                   ],
+                ),
+                trailing: PopupMenuButton(
+                  itemBuilder: (context) =>
+                  [
+                    const PopupMenuItem(
+                      value: 'responded',
+                      child: Text('Mark as Responded'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'cleared',
+                      child: Text('Mark as Cleared'),
+                    ),
+                  ],
+                  onSelected: (value) =>
+                      _updateStatus(
+                        notification['id'],
+                        value.toString(),
+                      ),
                 ),
               ),
             );
@@ -127,18 +162,11 @@ class _PoliceDashboardScreenState extends State<PoliceDashboardScreen> {
     );
   }
 
-  void _openMap(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      print('Could not launch $url');
+  void _openMap(String location) {
+    final coordinates = location.split(',');
+    if (coordinates.length == 2) {
+      final url = 'https://www.google.com/maps/search/?api=1&query=${coordinates[0]},${coordinates[1]}';
+      launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     }
-  }
-
-  @override
-  void dispose() {
-    supabase.removeChannel(_subscription);
-    super.dispose();
   }
 }

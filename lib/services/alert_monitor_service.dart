@@ -32,7 +32,6 @@ class AlertMonitorService {
 
   Future<void> _handleAlert(Map<String, dynamic> alert) async {
     try {
-      // Find the user profile using device_id from alcohol_status
       final List<dynamic> profiles = await _supabase
           .from('profiles')
           .select()
@@ -44,20 +43,34 @@ class AlertMonitorService {
       }
 
       final Map<String, dynamic> userProfile = profiles.first;
+      // Get current location
       final Position? location = await _locationService.getCurrentLocation();
 
-      // Insert into police_notifications table with user details
+      // Create a location string for the database
+      final String? locationString = location != null
+          ? '${location.latitude},${location.longitude}'
+          : null;
+
+      // Insert into police_notifications with location
       await _supabase.from('police_notifications').insert({
         'user_id': userProfile['id'],
         'username': userProfile['username'],
         'alcohol_level': alert['alcohol_level'],
         'timestamp': DateTime.now().toIso8601String(),
-        'location': location != null
-            ? '${location.latitude},${location.longitude}'
-            : null,
+        'location': locationString, // Make sure this is being set
       });
 
-      print('Police notification created for user: ${userProfile['username']}');
+      // Show notification
+      final String notificationBody = '''User: ${userProfile['username']}
+Alcohol Level: ${alert['alcohol_level']}
+Location: ${locationString ?? 'Unavailable'}''';
+
+      await NotificationService.showNotification(
+        title: 'High Alcohol Level Alert',
+        body: notificationBody,
+      );
+
+      print('Police notification created with location: $locationString');
     } catch (e) {
       print('Error handling alert: $e');
     }
@@ -85,6 +98,17 @@ class AlertMonitorService {
 
       if (alert) {
         final Position? location = await _locationService.getCurrentLocation();
+
+        // Create police notification
+        await _supabase.from('police_notifications').insert({
+          'user_id': userProfile['id'],
+          'username': userProfile['username'],
+          'alcohol_level': alcoholLevel,
+          'timestamp': DateTime.now().toIso8601String(),
+          'location': location != null
+              ? '${location.latitude},${location.longitude}'
+              : null,
+        });
 
         final String locationInfo = location != null
             ? '\nLocation: https://www.google.com/maps/search/?api=1&query=${location.latitude},${location.longitude}'
