@@ -12,106 +12,58 @@ class PoliceDashboardScreen extends StatefulWidget {
 
 class _PoliceDashboardScreenState extends State<PoliceDashboardScreen> {
   final SupabaseClient supabase = Supabase.instance.client;
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   List<Map<String, dynamic>> alerts = [];
-  DateTime? _lastCheckedTime;
+  late RealtimeChannel _subscription;
 
   @override
   void initState() {
     super.initState();
-    _initializeNotifications();
     _loadAlerts();
-    _startPolling();
+    _setupRealtimeSubscription();
   }
 
-  Future<void> _initializeNotifications() async {
-    const AndroidInitializationSettings initializationSettingsAndroid =
-    AndroidInitializationSettings('@mipmap/ic_launcher');
-
-    const InitializationSettings initializationSettings =
-    InitializationSettings(android: initializationSettingsAndroid);
-
-    await _notifications.initialize(initializationSettings);
-    _lastCheckedTime = DateTime.now();
-  }
-
-  Future<void> _loadAlerts() async {
-    final response = await supabase
-        .from('drunk_monitor')
-        .select('*, profiles!drunk_monitor_user_id_fkey(*)')
-        .order('timestamp', ascending: false);
-
-    if (mounted) {
-      setState(() {
-        alerts = List<Map<String, dynamic>>.from(response);
-      });
-    }
-  }
-
-  void _startPolling() {
-    // Check for new alerts every 30 seconds
-    Future.delayed(const Duration(seconds: 30), () async {
-      if (mounted) {
-        await _checkNewAlerts();
-        _startPolling();
-      }
+  void _setupRealtimeSubscription() {
+    _subscription = supabase
+        .channel('police_alerts')
+        .onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'police_notifications',
+      callback: (payload) async {
+        print('New police notification: ${payload.toString()}');
+        await _loadAlerts();
+        if (mounted) setState(() {});
+      },
+    )
+        .subscribe((status, [error]) {
+      print('Subscription status: $status');
+      if (error != null) print('Subscription error: $error');
     });
   }
 
-  Future<void> _checkNewAlerts() async {
+  Future<void> _loadAlerts() async {
     try {
       final response = await supabase
-          .from('drunk_monitor')
-          .select('*, profiles!drunk_monitor_user_id_fkey(*)')
-          .eq('alert', true)
-          .gt('timestamp', _lastCheckedTime!.toIso8601String())
-          .order('timestamp');
+          .from('police_notifications')
+          .select('''
+            *,
+            profiles!police_notifications_user_id_fkey (
+              username
+            )
+          ''')
+          .order('timestamp', ascending: false);
 
-      if (response != null) {
-        final newAlerts = List<Map<String, dynamic>>.from(response);
-
-        for (final alert in newAlerts) {
-          await _showNotification(
-            title: 'Alcohol Alert!',
-            body: 'Alert from user: ${alert['profiles']['username']}\n'
-                'Alcohol Level: ${alert['alcohol_level']}',
-          );
-        }
-
-        if (newAlerts.isNotEmpty) {
-          _lastCheckedTime = DateTime.now();
-          _loadAlerts(); // Refresh the list
-        }
+      if (mounted) {
+        setState(() {
+          alerts = List<Map<String, dynamic>>.from(response);
+        });
       }
     } catch (e) {
-      print('Error checking alerts: $e');
+      print('Error loading alerts: $e');
     }
   }
 
-  Future<void> _showNotification({
-    required String title,
-    required String body,
-  }) async {
-    const AndroidNotificationDetails androidPlatformChannelSpecifics =
-    AndroidNotificationDetails(
-      'alcohol_alerts',
-      'Alcohol Alerts',
-      importance: Importance.max,
-      priority: Priority.high,
-      enableVibration: true,
-      playSound: true,
-    );
 
-    const NotificationDetails platformChannelSpecifics =
-    NotificationDetails(android: androidPlatformChannelSpecifics);
-
-    await _notifications.show(
-      DateTime.now().millisecond,
-      title,
-      body,
-      platformChannelSpecifics,
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -120,46 +72,57 @@ class _PoliceDashboardScreenState extends State<PoliceDashboardScreen> {
         title: const Text('Police Dashboard'),
         backgroundColor: Colors.blue[900],
       ),
-      body: ListView.builder(
-        itemCount: alerts.length,
-        itemBuilder: (context, index) {
-          final alert = alerts[index];
-          final mapLink = 'https://www.google.com/maps/search/?api=1&query=${alert['latitude']},${alert['longitude']}';
+      body: RefreshIndicator(
+        onRefresh: _loadAlerts,
+        child: ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          itemCount: alerts.length,
+          itemBuilder: (context, index) {
+            final alert = alerts[index];
+            // Safely handle location data
+            String? mapLink;
+            if (alert['location'] != null && alert['location'].toString().contains(',')) {
+              final location = alert['location'].toString().split(',');
+              if (location.length == 2) {
+                mapLink = 'https://www.google.com/maps/search/?api=1&query=${location[0]},${location[1]}';
+              }
+            }
 
-          return Card(
-            margin: const EdgeInsets.all(8),
-            color: alert['alert'] == true ? Colors.red[50] : Colors.white,
-            child: ListTile(
-              leading: const Icon(
-                Icons.warning,
-                color: Colors.red,
-                size: 40,
-              ),
-              title: Text(
-                'User: ${alert['profiles']['username']} - Level: ${alert['alcohol_level']}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Time: ${alert['timestamp']}'),
-                  const SizedBox(height: 4),
-                  if (alert['latitude'] != null)
-                    InkWell(
-                      onTap: () => _openMap(mapLink),
-                      child: const Text(
-                        '📍 View Location',
-                        style: TextStyle(
-                          color: Colors.blue,
-                          decoration: TextDecoration.underline,
+            return Card(
+              margin: const EdgeInsets.all(8),
+              color: alert['alert'] == true ? Colors.red[50] : Colors.white,
+              child: ListTile(
+                leading: const Icon(
+                  Icons.warning,
+                  color: Colors.red,
+                  size: 40,
+                ),
+                title: Text(
+                  'User: ${alert['profiles']['username']} - Level: ${alert['alcohol_level']}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Time: ${alert['timestamp']}'),
+                    const SizedBox(height: 4),
+                    if (mapLink != null)
+                      InkWell(
+                        onTap: () => _openMap(mapLink!),
+                        child: const Text(
+                          '📍 View Location',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            decoration: TextDecoration.underline,
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
@@ -175,6 +138,7 @@ class _PoliceDashboardScreenState extends State<PoliceDashboardScreen> {
 
   @override
   void dispose() {
+    supabase.removeChannel(_subscription);
     super.dispose();
   }
 }

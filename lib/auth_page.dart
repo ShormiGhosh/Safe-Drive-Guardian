@@ -1,3 +1,5 @@
+import 'package:alchoholdetect/police_dashBoard.dart';
+import 'package:alchoholdetect/profile_page.dart';
 import 'package:alchoholdetect/services/session_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -28,21 +30,18 @@ class _AuthPageState extends State<AuthPage> {
     super.dispose();
   }
 
-  // Replace your current _isValidEmail method with this simpler version:
   bool _isValidEmail(String email) {
     // Simpler regex that accepts most common email formats
     final emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
     return emailRegex.hasMatch(email);
   }
 
-  // In _AuthPageState class, update the _signUp method:
 
   Future<void> _signUp() async {
     final String username = _usernameController.text.trim();
     final String email = _emailController.text.trim().toLowerCase();
     final String password = _passwordController.text.trim();
 
-    // Basic validation
     if (username.isEmpty || email.isEmpty || password.isEmpty) {
       _showSnackBar('Please fill all fields', isError: true);
       return;
@@ -52,7 +51,10 @@ class _AuthPageState extends State<AuthPage> {
       _showSnackBar('Username must be at least 3 characters', isError: true);
       return;
     }
-
+    if (!_isValidEmail(email)) {
+      _showSnackBar('Enter a valid email', isError: true);
+      return;
+    }
     if (password.length < 6) {
       _showSnackBar('Password must be at least 6 characters', isError: true);
       return;
@@ -68,20 +70,18 @@ class _AuthPageState extends State<AuthPage> {
           throw const AuthException("Invalid police credentials");
         }
       }
-      // Sign up with Supabase
       final AuthResponse response = await _supabase.auth.signUp(
         email: email,
         password: password,
         data: {
-          'username': username, // store in user_metadata
+          'username': username,
         },
       );
 
       if (response.user != null) {
-        // Insert into profiles table immediately
         await _supabase.from('profiles').insert({
           'id': response.user!.id,
-          'username': username, // exact username
+          'username': username,
           'email': email,
           'created_at': DateTime.now().toIso8601String(),
         });
@@ -91,7 +91,6 @@ class _AuthPageState extends State<AuthPage> {
           isError: false,
         );
 
-        // Clear form and switch to login mode
         setState(() {
           _isSignUp = false;
           _emailController.clear();
@@ -124,66 +123,47 @@ class _AuthPageState extends State<AuthPage> {
   }
 
   Future<void> _signIn() async {
-    String email = _emailController.text.trim().toLowerCase();
-    final String password = _passwordController.text.trim();
-
-    if (email.isEmpty || password.isEmpty) {
-      _showSnackBar('Please enter both email and password', isError: true);
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // Check for police credentials first
-      if (email == "dummyemail@police.gov.bd") {
-        if (password == "police123") {
-          final response = await _supabase.auth.signInWithPassword(
-            email: email,
-            password: password,
-          );
-          if (response.user != null) {
-            await SessionManager.saveLoginSession(
-              email: email,
-              userId: response.user!.id,
-              isPolice: true,
-            );
-            _showSnackBar('Police login successful!', isError: false);
-          }
-        } else {
-          throw const AuthException("Invalid police credentials");
-        }
-      } else {
-        // Regular user login
-        final response = await _supabase.auth.signInWithPassword(
+      final email = _emailController.text.trim();
+      final password = _passwordController.text.trim();
+
+      if (email.isEmpty || password.isEmpty) {
+        throw const AuthException('Please fill in all fields');
+      }
+
+      final isPolice = email == "dummyemail@police.gov.bd";
+
+      final response = await _supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      if (response.user != null) {
+        await SessionManager.saveLoginSession(
           email: email,
-          password: password,
+          isPolice: isPolice,
         );
-        if (response.user != null) {
-          await SessionManager.saveLoginSession(
-            email: email,
-            userId: response.user!.id,
-            isPolice: false,
+
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => isPolice
+                  ? const PoliceDashboardScreen()
+                  : const ProfilePage(),
+            ),
           );
-          _showSnackBar('Login successful!', isError: false);
         }
       }
-    } on AuthException catch (error) {
-      String errorMessage = 'Login failed';
-
-      if (error.message.contains('Invalid login credentials')) {
-        errorMessage = 'Invalid email or password';
-      } else if (error.message.contains('Email not confirmed')) {
-        errorMessage = 'Please verify your email before signing in';
-      } else {
-        errorMessage = error.message;
-      }
-
-      _showSnackBar(errorMessage, isError: true);
     } catch (error) {
-      _showSnackBar('An error occurred during login', isError: true);
+      if (mounted) {
+        _showSnackBar(error.toString(), isError: true);
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -192,7 +172,6 @@ class _AuthPageState extends State<AuthPage> {
       }
     }
   }
-
   void _showSnackBar(String message, {required bool isError}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

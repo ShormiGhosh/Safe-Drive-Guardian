@@ -23,8 +23,7 @@ class _LocationTrackingWidgetState extends State<LocationTrackingWidget> {
       if (position != null) {
         setState(() => _currentPosition = position);
       } else {
-        // Handle location service disabled or permissions denied
-        if (mounted) {
+         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Unable to get location. Please check settings.'),

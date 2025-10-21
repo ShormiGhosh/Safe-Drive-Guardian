@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:alchoholdetect/profile_page.dart';
 import 'package:alchoholdetect/services/session_manager.dart';
 import 'package:flutter/material.dart';
@@ -7,37 +9,34 @@ import 'package:alchoholdetect/supabase_config.dart';
 import 'package:alchoholdetect/auth_page.dart';
 import 'package:alchoholdetect/gps_locator.dart';
 import 'package:alchoholdetect/police_dashBoard.dart';
+import 'package:alchoholdetect/services/notification_service.dart';
+import 'package:alchoholdetect/services/alert_monitor_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-  FlutterLocalNotificationsPlugin();
-  const AndroidInitializationSettings initializationSettingsAndroid =
-  AndroidInitializationSettings('@mipmap/ic_launcher');
-  const InitializationSettings initializationSettings =
-  InitializationSettings(android: initializationSettingsAndroid);
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
+  // Initialize Supabase
   await Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
   );
 
-  // Auth state listener for automatic profile creation
-  // In main.dart, update the auth state listener:
+  // Initialize Notifications
+  await NotificationService.initialize();
+
+  // Initialize Alert Monitoring
+  final alertMonitor = AlertMonitorService();
+  await alertMonitor.startMonitoring();
+
   Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
     final event = data.event;
     final session = data.session;
     final user = session?.user;
 
     if (event == AuthChangeEvent.signedIn && user != null) {
-      print('User signed in: ${user.id}');
-
       try {
-        // Wait a bit for the session to be fully established
         await Future.delayed(const Duration(seconds: 1));
 
-        // Check if profile exists
         final profile = await Supabase.instance.client
             .from('profiles')
             .select()
@@ -45,20 +44,14 @@ void main() async {
             .maybeSingle();
 
         if (profile == null) {
-          print('Creating profile for new user: ${user.id}');
-
-          // Get username from user_metadata (set during signup)
           final username = user.userMetadata?['username'] ?? 'User';
 
-// Create profile using real username
           await Supabase.instance.client.from('profiles').insert({
             'id': user.id,
             'username': username,
             'email': user.email ?? '',
             'created_at': DateTime.now().toIso8601String(),
           });
-
-          print('Profile created successfully for user: ${user.id}');
         }
       } catch (error) {
         print('Error in auth state listener: $error');
@@ -68,6 +61,8 @@ void main() async {
 
   runApp(const MyApp());
 }
+
+// Rest of your code remains the same...
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -80,7 +75,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         useMaterial3: true,
       ),
-      home: const AuthWrapper(),
+      home: const AuthPage(),
       debugShowCheckedModeBanner: false,
     );
   }
@@ -91,14 +86,10 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: SessionManager.isLoggedIn(),
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.data == true) {
+        if (snapshot.hasData) {
           return FutureBuilder<bool>(
             future: SessionManager.isPoliceUser(),
             builder: (context, policeSnapshot) {
@@ -141,7 +132,7 @@ class _HomePageState extends State<HomePage> {
             .from('profiles')
             .select()
             .eq('id', user.id)
-            .maybeSingle(); // safer than .single()
+            .maybeSingle();
 
         if (response != null && response is Map<String, dynamic>) {
           setState(() {
